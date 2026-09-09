@@ -1,0 +1,390 @@
+---
+title: "Analyzing Student Academic Performance"
+subtitle: "Factors Influencing Exam Scores"
+author: "Satyam Kumar"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: cosmo
+    number_sections: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.align = "center")
+```
+
+# Introduction
+
+## Problem Statement
+
+Educational institutions want to understand which background and preparation
+factors are associated with how well students perform in exams. This report
+analyzes the **"Students Performance in Exams"** Dataset, which records the
+math, reading, and writing scores of 1,000 students along with demographic
+and preparatory attributes such as gender, parental level of education,
+lunch type (a proxy for socio-economic status), and whether the student
+completed a test-preparation course.
+
+**Objectives of this project:**
+
+1. Import and inspect the raw dataset.
+2. Clean and preprocess the data for analysis.
+3. Explore the data using summary statistics and visualizations.
+4. Test whether specific factors (test preparation, lunch type, gender) are
+   statistically associated with exam performance.
+5. Summarize findings and draw conclusions.
+
+## Loading Required Packages
+
+We use `dplyr` and `tidyr` for data manipulation and `ggplot2` for
+visualization. These are the standard "tidyverse" tools for data analysis
+in R.
+
+```{r libraries}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+# Data Importing
+
+The dataset is provided as a CSV file. We import it using `read.csv()`,
+which is R's base function for reading comma-separated value files into a
+data frame — the core rectangular data structure R uses for tabular data.
+
+```{r import}
+students <- read.csv("StudentsPerformance.csv", stringsAsFactors = FALSE)
+
+# Basic structure: number of rows/columns and data types of each column
+str(students)
+```
+
+```{r import-head}
+# First 6 rows, to visually confirm the import looks correct
+head(students)
+```
+
+```{r import-dim}
+cat("Rows:", nrow(students), " Columns:", ncol(students), "\n")
+```
+
+**Interpretation:** The dataset has 1,000 rows (one per student) and 8
+columns: 5 categorical attributes (`gender`, `race/ethnicity`,
+`parental level of education`, `lunch`, `test preparation course`) and 3
+numeric exam scores (`math score`, `reading score`, `writing score`).
+
+# Data Preprocessing and Cleaning
+
+Raw data is rarely analysis-ready. In this section we standardize column
+names, check for missing values and duplicate rows, fix data types, and
+engineer a couple of useful derived variables.
+
+## Standardizing Column Names
+
+The original column names contain spaces and slashes, which are awkward to
+reference in R code (they must be wrapped in backticks). We rename them to
+clean, `snake_case` names using `rename()`.
+
+```{r rename}
+students <- students %>%
+  rename(
+    gender          = gender,
+    ethnicity_group = `race.ethnicity`,
+    parent_education = `parental.level.of.education`,
+    lunch           = lunch,
+    test_prep       = `test.preparation.course`,
+    math_score      = `math.score`,
+    reading_score   = `reading.score`,
+    writing_score   = `writing.score`
+  )
+
+colnames(students)
+```
+
+*Note:* `read.csv()` automatically converts spaces and slashes in the
+original header row into dots (e.g. `race/ethnicity` becomes
+`race.ethnicity`), so we reference those dotted names on the right-hand
+side of `rename()`.
+
+## Checking for Missing Values
+
+```{r missing}
+colSums(is.na(students))
+```
+
+**Interpretation:** There are no missing values in any column, so no
+imputation or row-removal is required for this step. We still show this
+check explicitly because verifying data completeness is a mandatory part
+of any cleaning pipeline, even when the result is "no problem found."
+
+## Checking for Duplicate Rows
+
+```{r duplicates}
+sum(duplicated(students))
+```
+
+No duplicate rows are present.
+
+## Fixing Data Types
+
+Categorical columns are currently stored as plain text (`character`). We
+convert them to R's `factor` type, which is the appropriate type for
+categorical variables and is required for grouped statistics, plotting
+order, and modeling.
+
+```{r factors}
+students <- students %>%
+  mutate(
+    gender            = factor(gender),
+    ethnicity_group   = factor(ethnicity_group),
+    parent_education  = factor(parent_education,
+                                levels = c("some high school", "high school",
+                                           "some college", "associate's degree",
+                                           "bachelor's degree", "master's degree")),
+    lunch             = factor(lunch),
+    test_prep         = factor(test_prep, levels = c("none", "completed"))
+  )
+
+str(students)
+```
+
+## Feature Engineering
+
+We add two derived variables that make later analysis easier:
+
+* `average_score` — the mean of the three subject scores, used as a single
+  overall-performance metric.
+* `pass_fail` — a simple pass/fail label using 60 as an illustrative
+  passing threshold on the average score.
+
+```{r feature-engineering}
+students <- students %>%
+  mutate(
+    average_score = round((math_score + reading_score + writing_score) / 3, 1),
+    pass_fail = factor(ifelse(average_score >= 60, "Pass", "Fail"),
+                        levels = c("Pass", "Fail"))
+  )
+
+head(students %>% select(gender, test_prep, math_score, reading_score,
+                          writing_score, average_score, pass_fail))
+```
+
+The cleaned dataset now has `r ncol(students)` columns and `r nrow(students)`
+rows, with correct data types and two new analysis-ready variables.
+
+# Data Analysis and Statistical Exploration
+
+## Overall Summary Statistics
+
+```{r summary}
+summary(students %>% select(math_score, reading_score, writing_score, average_score))
+```
+
+**Interpretation:** Average scores across all three subjects cluster
+around the high-60s, with reading scores tending to be slightly higher on
+average than math scores.
+
+## Performance by Test Preparation Course
+
+```{r group-test-prep}
+students %>%
+  group_by(test_prep) %>%
+  summarise(
+    n = n(),
+    mean_math    = round(mean(math_score), 1),
+    mean_reading = round(mean(reading_score), 1),
+    mean_writing = round(mean(writing_score), 1),
+    mean_average = round(mean(average_score), 1)
+  )
+```
+
+**Interpretation:** Students who completed the test preparation course
+score higher on average across all three subjects than those who did not,
+suggesting a positive association between preparation and performance.
+
+## Performance by Lunch Type (Socio-Economic Proxy)
+
+```{r group-lunch}
+students %>%
+  group_by(lunch) %>%
+  summarise(
+    n = n(),
+    mean_average = round(mean(average_score), 1),
+    sd_average   = round(sd(average_score), 1)
+  )
+```
+
+**Interpretation:** Students receiving a "standard" lunch (generally
+associated with higher household income) show a noticeably higher average
+score than those on "free/reduced" lunch, consistent with prior education
+research linking socio-economic status to academic outcomes.
+
+## Correlation Between Subject Scores
+
+```{r correlation}
+cor(students %>% select(math_score, reading_score, writing_score))
+```
+
+**Interpretation:** All three subject scores are strongly positively
+correlated (values above 0.8), meaning students who score well in one
+subject tend to score well in the others — an overall "academic ability"
+factor appears to be at play rather than subject-specific skills acting
+independently.
+
+## Statistical Test: Does Test Preparation Significantly Affect Scores?
+
+We use an independent-samples **t-test** to check whether the difference
+in average scores between students who completed the test-prep course and
+those who did not is statistically significant (not just due to random
+sampling variation).
+
+```{r t-test}
+t.test(average_score ~ test_prep, data = students)
+```
+
+**Interpretation:** The p-value is well below 0.05, so we reject the null
+hypothesis of no difference. Completing the test preparation course is
+associated with a statistically significant increase in average exam
+score.
+
+## Statistical Test: Does Gender Affect Math Scores?
+
+```{r anova-gender}
+t.test(math_score ~ gender, data = students)
+```
+
+**Interpretation:** Compare the p-value to the 0.05 significance
+threshold: if it is below 0.05, there is a statistically significant
+difference in math scores between genders in this sample.
+
+## Simple Linear Regression: Predicting Writing Score from Reading Score
+
+```{r regression}
+model <- lm(writing_score ~ reading_score, data = students)
+summary(model)
+```
+
+**Interpretation:** The coefficient on `reading_score` shows how many
+points writing score is predicted to change for every one-point increase
+in reading score. The R-squared value indicates the proportion of
+variance in writing scores explained by reading scores alone — a high
+value here confirms the strong correlation seen earlier.
+
+# Graphs and Plots
+
+## Distribution of Average Scores
+
+```{r plot-histogram}
+ggplot(students, aes(x = average_score)) +
+  geom_histogram(binwidth = 5, fill = "#4C72B0", color = "white") +
+  labs(title = "Distribution of Average Student Scores",
+       x = "Average Score", y = "Number of Students") +
+  theme_minimal()
+```
+
+**Interpretation:** The distribution is roughly bell-shaped and centered
+around the high-60s, consistent with the summary statistics computed
+earlier, with relatively few students at the extreme low or high ends.
+
+## Average Score by Test Preparation Course
+
+```{r plot-boxplot-prep}
+ggplot(students, aes(x = test_prep, y = average_score, fill = test_prep)) +
+  geom_boxplot() +
+  labs(title = "Average Score by Test Preparation Course",
+       x = "Test Preparation Course", y = "Average Score") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+**Interpretation:** The boxplot shows both a higher median and a higher
+lower-quartile score for students who completed the preparation course,
+visually confirming the statistically significant difference found in the
+t-test above.
+
+## Reading vs. Writing Score (Relationship)
+
+```{r plot-scatter}
+ggplot(students, aes(x = reading_score, y = writing_score)) +
+  geom_point(alpha = 0.4, color = "#55A868") +
+  geom_smooth(method = "lm", se = TRUE, color = "darkred") +
+  labs(title = "Relationship Between Reading and Writing Scores",
+       x = "Reading Score", y = "Writing Score") +
+  theme_minimal()
+```
+
+**Interpretation:** Points cluster tightly around the upward-sloping
+trend line, visually confirming the strong positive correlation between
+reading and writing scores calculated earlier.
+
+## Average Score by Parental Education Level
+
+```{r plot-bar-education}
+students %>%
+  group_by(parent_education) %>%
+  summarise(mean_score = mean(average_score)) %>%
+  ggplot(aes(x = parent_education, y = mean_score, fill = parent_education)) +
+  geom_col() +
+  labs(title = "Average Score by Parental Education Level",
+       x = "Parental Education Level", y = "Average Score") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 40, hjust = 1), legend.position = "none")
+```
+
+**Interpretation:** Average scores tend to rise with parental education
+level, with students whose parents hold a master's degree scoring highest
+on average and those whose parents completed only some high school
+scoring lowest — suggesting a link between parental educational
+background and student performance.
+
+## Pass/Fail Proportions by Lunch Type
+
+```{r plot-pass-fail}
+ggplot(students, aes(x = lunch, fill = pass_fail)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Pass/Fail Proportion by Lunch Type",
+       x = "Lunch Type", y = "Proportion of Students", fill = "Result") +
+  theme_minimal()
+```
+
+**Interpretation:** A visibly larger share of "free/reduced" lunch
+students fall into the "Fail" category (average score below 60) compared
+to "standard" lunch students, reinforcing the socio-economic pattern
+observed earlier.
+
+# Findings and Conclusion
+
+Based on the import, cleaning, statistical analysis, and visualizations
+above, this project finds:
+
+1. **Test preparation matters.** Students who completed the test
+   preparation course scored significantly higher on average
+   (statistically confirmed with a t-test, p < 0.05).
+2. **Socio-economic status is associated with performance.** Students on
+   "standard" lunch (a proxy for higher income) outperformed those on
+   "free/reduced" lunch, both in average score and in pass rate.
+3. **Parental education level correlates positively with student
+   scores** — average scores generally increase as parental education
+   level rises.
+4. **Subject scores are highly inter-correlated.** Math, reading, and
+   writing scores are all strongly positively correlated (r > 0.8),
+   and reading score alone is a strong linear predictor of writing
+   score.
+5. **Gender differences** in math score were tested directly; refer to
+   the t-test output above for whether the difference in this sample is
+   statistically significant.
+
+**Overall conclusion:** Exam performance in this dataset is not driven by
+any single factor in isolation. Preparatory effort (test-prep course
+completion) and socio-economic/background factors (lunch type, parental
+education) all show measurable, statistically supported associations with
+student outcomes. This suggests that interventions such as expanding
+access to test-preparation resources and support programs targeted at
+lower-income students could meaningfully improve academic outcomes.
+
+*Data source: "Students Performance in Exams" dataset (publicly available,
+1,000 student records, 8 attributes).*
