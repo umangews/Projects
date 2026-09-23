@@ -3,20 +3,12 @@ import javax.swing.border.*;
 import javax.swing.table.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.List;
 
-/**
- * Event-Based Student Registration Form
- *
- * Demonstrates the Java Event Delegation Model using:
- *  - ActionListener  → Button clicks, ComboBox selection
- *  - ItemListener    → Checkbox and RadioButton state changes
- *  - FocusListener   → Field focus (enter / exit)
- *  - KeyListener     → Real-time keystroke handling
- *  - MouseListener   → Table row hover & click
- *  - WindowListener  → Application close confirmation
- */
+
 public class StudentForm extends JFrame
         implements ActionListener, ItemListener, FocusListener,
                    KeyListener, MouseListener, WindowListener {
@@ -54,9 +46,19 @@ public class StudentForm extends JFrame
     // =============================================================
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
+            // Try Nimbus first so custom button colors are always rendered
             try {
-                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-            } catch (Exception ignored) {}
+                for (UIManager.LookAndFeelInfo info : UIManager.getInstalledLookAndFeels()) {
+                    if ("Nimbus".equals(info.getName())) {
+                        UIManager.setLookAndFeel(info.getClassName());
+                        break;
+                    }
+                }
+            } catch (Exception ignored) {
+                try {
+                    UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
+                } catch (Exception ignored2) {}
+            }
             new StudentForm().setVisible(true);
         });
     }
@@ -568,17 +570,60 @@ public class StudentForm extends JFrame
 
     private void handleExport() {
         if (studentData.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "No data to export.", "Empty", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(this, "No data to export.",
+                    "Empty", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
+
+        // Build CSV content
         StringBuilder sb = new StringBuilder();
         sb.append("#,Name,Roll,Age,Email,Gender,Course,Year,Skills\n");
-        for (String[] r : studentData) sb.append(String.join(",", r)).append("\n");
-        JOptionPane.showMessageDialog(this,
-                new JTextArea(sb.toString()),
-                "📋 Exported Data (CSV Preview)", JOptionPane.INFORMATION_MESSAGE);
-        setStatus("⬇  Export preview shown (" + studentData.size() + " records).");
+        for (String[] r : studentData) {
+            for (int i = 0; i < r.length; i++) {
+                String cell = r[i] == null ? "" : r[i];
+                // Quote cells that contain commas or quotes
+                if (cell.contains(",") || cell.contains("\"") || cell.contains("\n")) {
+                    cell = "\"" + cell.replace("\"", "\"\"") + "\"";
+                }
+                sb.append(cell);
+                if (i < r.length - 1) sb.append(",");
+            }
+            sb.append("\n");
+        }
+
+        // File chooser — let user pick save location
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Save Student Data as CSV");
+        chooser.setSelectedFile(new File("students.csv"));
+        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("CSV Files (*.csv)", "csv"));
+
+        int result = chooser.showSaveDialog(this);
+        if (result != JFileChooser.APPROVE_OPTION) {
+            setStatus("⬇  Export cancelled.");
+            return;
+        }
+
+        File file = chooser.getSelectedFile();
+        // Ensure .csv extension
+        if (!file.getName().toLowerCase().endsWith(".csv")) {
+            file = new File(file.getAbsolutePath() + ".csv");
+        }
+
+        try (Writer writer = new OutputStreamWriter(
+                new FileOutputStream(file), StandardCharsets.UTF_8)) {
+            writer.write(sb.toString());
+            setStatus("✅  Exported " + studentData.size() + " record(s) to: " + file.getAbsolutePath());
+            JOptionPane.showMessageDialog(this,
+                    "Successfully exported " + studentData.size() + " record(s).\n\nSaved to:\n" + file.getAbsolutePath(),
+                    "Export Successful", JOptionPane.INFORMATION_MESSAGE);
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this,
+                    "Failed to save file:\n" + ex.getMessage(),
+                    "Export Error", JOptionPane.ERROR_MESSAGE);
+            setStatus("❌  Export failed: " + ex.getMessage());
+        }
     }
+
 
     private boolean validateAll() {
         if (tfName.getText().trim().isEmpty())  { err(tfName,  "Name cannot be empty.");         return false; }
@@ -705,17 +750,24 @@ public class StudentForm extends JFrame
 
     private JButton actionBtn(String text, Color bg, Color fg) {
         JButton btn = new JButton(text);
-        btn.setFont(new Font("Segoe UI", Font.BOLD, 13));
+        btn.setFont(new Font("Segoe UI", Font.BOLD, 14));
         btn.setBackground(bg);
         btn.setForeground(fg);
+        btn.setOpaque(true);
+        btn.setContentAreaFilled(true);
         btn.setFocusPainted(false);
+        btn.setBorderPainted(true);
         btn.setBorder(new CompoundBorder(
-                new LineBorder(bg.darker(), 1, true),
-                new EmptyBorder(8, 18, 8, 18)));
+                new LineBorder(bg.darker(), 2, true),
+                new EmptyBorder(10, 22, 10, 22)));
         btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         btn.addMouseListener(new MouseAdapter() {
-            @Override public void mouseEntered(MouseEvent e) { btn.setBackground(bg.brighter()); }
-            @Override public void mouseExited(MouseEvent e)  { btn.setBackground(bg); }
+            @Override public void mouseEntered(MouseEvent e) {
+                btn.setBackground(bg.darker());
+            }
+            @Override public void mouseExited(MouseEvent e)  {
+                btn.setBackground(bg);
+            }
         });
         return btn;
     }
